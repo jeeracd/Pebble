@@ -1,7 +1,9 @@
 package main
 
 import (
+	"fmt"
 	"log"
+	"strings"
 )
 
 type token struct {
@@ -163,7 +165,7 @@ func parseExpression() node {
 		pc++
 		token = pt[pc]
 
-		for token.kind != "paren" || (token.kind == "paren" && token.value == ")") {
+		for token.kind != "paren" && token.value == ")" {
 			{
 				n.parameters = append(n.parameters, parseExpression())
 				token = pt[pc]
@@ -218,4 +220,98 @@ func traverseNode(node node, parent node, visitor visitor) {
 	default:
 		log.Fatal(node.kind + " is not a valid node")
 	}
+}
+
+/* Transformer */
+
+func transform(a ast) ast {
+	newAst := ast{
+		body: []node{},
+		kind: "program",
+	}
+
+	a.context = &newAst.body
+
+	traverse(a, map[string]func(node *node, parent node){
+		"number": func(n *node, parent node) {
+			*parent.context = append(*parent.context, node{
+				kind:  "number",
+				value: n.value,
+			})
+		},
+
+		"call": func(n *node, parent node) {
+			expression := node{
+				kind:      "call",
+				callee:    &node{name: n.name, kind: "identifier"},
+				arguments: new([]node),
+			}
+
+			n.context = expression.arguments
+
+			if parent.kind != "call" {
+
+				es := node{
+					kind:       "expression",
+					expression: &expression,
+				}
+
+				*parent.context = append(*parent.context, es)
+			} else {
+				*parent.context = append(*parent.context, expression)
+			}
+
+		},
+	})
+
+	return newAst
+}
+
+/* Code Generator */
+
+func codeGenerator(node node) string {
+	switch node.kind {
+	case "program":
+		var r []string
+		for _, n := range node.body {
+			r = append(r, codeGenerator(n))
+		}
+		return strings.Join(r, "\n")
+	case "expression":
+		return codeGenerator(*node.expression) + ";"
+	case "call":
+		var ra []string
+		c := codeGenerator(*node.callee)
+		for _, a := range *node.arguments {
+			ra = append(ra, codeGenerator(a))
+		}
+
+		r := strings.Join(ra, ", ")
+		return c + "(" + r + ")"
+
+	case "identifier":
+		return node.name
+	case "number":
+		return node.value
+	default:
+		log.Fatal(node.kind + " is not a valid node")
+		return ""
+	}
+}
+
+/* Compiler */
+
+func compile(input string) string {
+	tokens := tokenize(input)
+	ast := parse(tokens)
+	newAst := transform(ast)
+	output := codeGenerator(node(newAst))
+
+	return output
+}
+
+func main() {
+	program := "(add 10 (subtract 4 2))"
+	output := compile(program)
+	fmt.Println(output)
 }
